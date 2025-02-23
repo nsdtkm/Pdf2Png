@@ -7,6 +7,7 @@ using System.Drawing;
 using System.Drawing.Imaging;
 using System.Windows.Forms;
 using System.Threading;
+using System.Reflection;
 
 namespace Pdf2Png
 {
@@ -14,7 +15,9 @@ namespace Pdf2Png
     {
         static async Task Main(string[] args)
         {
-            Console.WriteLine("Pdf2Png.exe (nishidataku@yamaha-motor.co.jp)");
+            Assembly assm = Assembly.GetExecutingAssembly();
+            AssemblyName name = assm.GetName();
+            Console.WriteLine($"Pdf2Png.exe (nishidataku@yamaha-motor.co.jp) ver:{name.Version}");
             Console.WriteLine("使い方 : Pdf2Png.exe <PDFファイルパス1> <PDFファイルパス2> ...");
             Console.WriteLine("TIPS : A0サイズなど大きいpdfはdpiに300程度を設定すると、拡大しても文字がつぶれません。");
             Console.WriteLine("TIPS : pdfファイルをexeファイルorショートカットにD&DでもOK。");
@@ -32,16 +35,13 @@ namespace Pdf2Png
                     od.FilterIndex = 1;
                     od.Multiselect = true;
 
-                    // ダイアログを表示する
-                    DialogResult result = od.ShowDialog();
-
-                    // 選択後の判定
-                    if (result == DialogResult.OK)
+                    // ダイアログ表示&選択後の判定
+                    if (od.ShowDialog() == DialogResult.OK)
                     {
                         //「開く」ボタンクリック時の処理
                         args = od.FileNames;
                     }
-                    else if (result == DialogResult.Cancel)
+                    else
                     {
                         return;
                     }
@@ -49,30 +49,14 @@ namespace Pdf2Png
             }
 
             //dpi指定
-            ushort dpi = 96;
-            Console.WriteLine("dpiを指定してください。(エンターでデフォルト値96を使用します。A0だと300程度が最適です。) : ");
-            string dpi_string=Console.ReadLine();
-            try
+            int dpi = 96;
+            Console.Write("dpiを指定してください。(エンターでデフォルト値96を使用します。A0だと300程度が最適です。) : ");
+            string dpiInput=Console.ReadLine();
+
+            if (!string.IsNullOrWhiteSpace(dpiInput) && !int.TryParse(dpiInput, out dpi))
             {
-                dpi = ushort.Parse(dpi_string);
-            }
-            catch (FormatException)
-            {
-                if (dpi_string == "")
-                {
-                    //何もせずデフォルト値を使う。
-                }
-                else
-                {
-                    Console.WriteLine("dpiは正の整数である必要があります。デフォルト値を使用します");
-                } 
-            }
-            catch(OverflowException){
-                Console.WriteLine("dpiは0~32767で必要があります。デフォルト値を使用します。");
-            }
-            catch (ArgumentNullException)
-            {
-                //何もせずデフォルト値を使う。
+                Console.WriteLine("無効なDPI値です。デフォルト値96を使用します。");
+                dpi = 96;
             }
 
             foreach (string pdfPath in args)
@@ -84,11 +68,11 @@ namespace Pdf2Png
                 }
                 await ConvertPdfToPngAsync(pdfPath, dpi);
             }
-            Console.WriteLine("変換が完了しました。");
+            Console.WriteLine("変換が完了しました。Press any key to close...");
             Console.ReadKey();
         }
 
-        static async Task ConvertPdfToPngAsync(string pdfPath, ushort dpi)
+        static async Task ConvertPdfToPngAsync(string pdfPath, int dpi)
         {
             try
             {
@@ -107,11 +91,16 @@ namespace Pdf2Png
 
                             using (InMemoryRandomAccessStream memoryStream = new InMemoryRandomAccessStream())
                             {
-                                PdfPageRenderOptions renderOptions = new PdfPageRenderOptions();
-                                renderOptions.DestinationWidth = (uint)Math.Round(page.Dimensions.ArtBox.Width / 96.0 * dpi);
+                                PdfPageRenderOptions renderOptions = new PdfPageRenderOptions()
+                                {
+                                    DestinationWidth = (uint)Math.Round(page.Size.Width * dpi / 144),  // DPI計算式を修正
+                                    DestinationHeight = (uint)Math.Round(page.Size.Height * dpi / 144) // DPI計算式を修正
+                                };
                                 await page.RenderToStreamAsync(memoryStream);
-                                SaveStreamToPng(memoryStream, outputFilePath);
-                                if (i== pdfDocument.PageCount-1){
+                                SaveStreamToPng(memoryStream, outputFilePath, dpi);
+
+                                if (i == pdfDocument.PageCount - 1)
+                                {
                                     Console.WriteLine($"{pdfPath} : {i + 1}/{pdfDocument.PageCount}");
                                 }
                                 else
@@ -130,11 +119,12 @@ namespace Pdf2Png
             }
         }
 
-        static void SaveStreamToPng(IRandomAccessStream stream, string outputFilePath)
+        static void SaveStreamToPng(IRandomAccessStream stream, string outputFilePath, int dpi)
         {
             using (Stream netStream = stream.AsStream())
             using (Bitmap bitmap = new Bitmap(netStream))
             {
+                bitmap.SetResolution(dpi, dpi);
                 bitmap.Save(outputFilePath, ImageFormat.Png);
             }
         }
